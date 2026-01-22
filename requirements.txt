@@ -1,0 +1,8 @@
+PyQt6>=6.5.0
+requests>=2.31.0
+pyperclip>=1.8.2
+plyer>=2.1.0
+win10toast>=0.9
+Pillow>=10.0.0
+winshell>=0.6
+pywin32>=305
