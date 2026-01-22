@@ -39,7 +39,6 @@ except ImportError:
 
 from config import Config, DatabaseManager
 
-
 class APIChecker(QThread):
     """API检查线程"""
     status_updated = pyqtSignal(str, str)  # (status, message)
@@ -584,18 +583,24 @@ class UpdateChecker(QThread):
             remote_info = self.config.check_for_updates()
             print(f"获取到的更新信息: {remote_info}")
 
-            if remote_info and 'version' in remote_info:
-                remote_version = remote_info['version']
-                print(f"远程版本: {remote_version}, 本地版本: {self.config.app_version}")
+            if remote_info and remote_info.get('success'):
+                data = remote_info.get('data', {})
+                remote_version = data.get('version')
 
-                if self.config.is_new_version_available(remote_version):
-                    print(f"发现新版本: {remote_version}")
-                    # 确保在主线程中发射信号
-                    self.update_available.emit(remote_info)
-                    self.check_completed.emit(True, f"发现新版本 {remote_version}")
+                if remote_version:
+                    print(f"远程版本: {remote_version}, 本地版本: {self.config.app_version}")
+
+                    if self.config.is_new_version_available(remote_version):
+                        print(f"发现新版本: {remote_version}")
+                        # 确保在主线程中发射信号
+                        self.update_available.emit(data)  # 传递data而不是remote_info
+                        self.check_completed.emit(True, f"发现新版本 {remote_version}")
+                    else:
+                        print("当前已是最新版本")
+                        self.check_completed.emit(False, "当前已是最新版本")
                 else:
-                    print("当前已是最新版本")
-                    self.check_completed.emit(False, "当前已是最新版本")
+                    print("更新信息中缺少版本号")
+                    self.check_completed.emit(False, "检查更新失败：版本信息不完整")
             else:
                 print("检查更新失败或无更新信息")
                 self.check_completed.emit(False, "检查更新失败或网络错误")
@@ -1742,26 +1747,30 @@ class IPAnalyzer(QMainWindow):
         """从文本中提取IP地址"""
         ips_found = []
 
-        # IPv4正则表达式
-        ipv4_pattern = r'\b(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.' \
-                       r'(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.' \
-                       r'(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.' \
-                       r'(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\b'
+        # 改进的IPv4正则表达式 - 支持中文字符前后的IP
+        ipv4_pattern = r'(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)'
 
-        # IPv6正则表达式 - 修复版本
-        # 匹配标准的IPv6地址格式，排除单独的 "::"
-        ipv6_pattern = r'(?:(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|' \
+        # 改进的IPv6正则表达式
+        ipv6_pattern = r'(?:[A-Fa-f0-9]{1,4}:){7}[A-Fa-f0-9]{1,4}|' \
                        r'(?:[A-Fa-f0-9]{1,4}:){1,6}:(?:[A-Fa-f0-9]{1,4}:){0,5}[A-Fa-f0-9]{1,4}|' \
                        r'[A-Fa-f0-9]{1,4}::(?:[A-Fa-f0-9]{1,4}:){0,5}[A-Fa-f0-9]{1,4}|' \
                        r'::(?:[A-Fa-f0-9]{1,4}:){0,6}[A-Fa-f0-9]{1,4}|' \
-                       r'(?:[A-Fa-f0-9]{1,4}:){1,7}:)'
+                       r'(?:[A-Fa-f0-9]{1,4}:){1,7}:'
 
         # 查找IPv4
         if self.config.enable_ipv4:
             ipv4_matches = re.finditer(ipv4_pattern, text)
             for match in ipv4_matches:
                 ip = match.group()
+                # 验证并确保不是部分匹配（如1.2.3.4.5中的1.2.3.4）
                 if self.is_valid_ipv4(ip):
+                    # 检查前后字符，确保不是更大的数字的一部分
+                    start_pos, end_pos = match.span()
+                    if start_pos > 0 and text[start_pos - 1].isdigit():
+                        continue  # 前一个字符是数字，可能是更大的数字的一部分
+                    if end_pos < len(text) and text[end_pos].isdigit():
+                        continue  # 后一个字符是数字，可能是更大的数字的一部分
+
                     ips_found.append((ip, "ipv4"))
 
         # 查找IPv6
@@ -1769,7 +1778,6 @@ class IPAnalyzer(QMainWindow):
             ipv6_matches = re.finditer(ipv6_pattern, text, re.IGNORECASE)
             for match in ipv6_matches:
                 ip = match.group()
-                # 排除单独的 "::" 或 ":::" 等无效格式
                 if self.is_valid_ipv6(ip):
                     ips_found.append((ip, "ipv6"))
 
@@ -1778,15 +1786,29 @@ class IPAnalyzer(QMainWindow):
     def is_valid_ipv4(self, ip: str) -> bool:
         """验证IPv4地址有效性"""
         try:
+            # 确保不是部分匹配
+            if re.match(r'^\d+$', ip):  # 纯数字不是IP
+                return False
+
             parts = ip.split('.')
             if len(parts) != 4:
                 return False
 
             for part in parts:
+                # 检查是否为空
+                if not part:
+                    return False
+
+                # 检查是否为数字
+                if not part.isdigit():
+                    return False
+
                 num = int(part)
                 if num < 0 or num > 255:
                     return False
-                if part.startswith('0') and len(part) > 1:
+
+                # 检查前导零
+                if len(part) > 1 and part.startswith('0'):
                     return False
 
             return True
