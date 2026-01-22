@@ -122,33 +122,46 @@ class Config:
     def check_for_updates(self) -> Optional[Dict[str, Any]]:
         """检查更新"""
         try:
-            # 模拟更新检查，实际应用中应该调用真实的更新API
-            update_url = f"{self.api_base_url}/api/check-update"
+            # 使用正确的版本文件地址
+            if self.api_base_url.startswith("https://ipv4.ink"):
+                update_url = "https://ipv4.ink/win/version.json"
+            else:
+                # 备用地址或测试地址
+                update_url = f"{self.api_base_url}/win/version.json"
 
-            # 设置请求参数
-            params = {
-                "version": self.app_version,
-                "app_name": self.app_name
-            }
+            print(f"正在检查更新，URL: {update_url}")
 
-            # 发送请求
-            response = requests.get(update_url, params=params, timeout=10)
+            # 发送请求，设置较短的超时时间
+            response = requests.get(update_url, timeout=15)
+
+            print(f"响应状态码: {response.status_code}")
 
             if response.status_code == 200:
                 update_info = response.json()
+                print(f"获取到的更新信息: {update_info}")
 
                 # 验证响应格式
-                if update_info.get("success"):
-                    return update_info.get("data")
+                if 'version' in update_info:
+                    # 返回正确的格式
+                    return {
+                        "success": True,
+                        "data": update_info
+                    }
                 else:
-                    print(f"更新检查失败: {update_info.get('message')}")
+                    print("更新信息格式错误，缺少version字段")
                     return None
             else:
                 print(f"更新检查HTTP错误: {response.status_code}")
                 return None
 
+        except requests.exceptions.Timeout:
+            print("更新检查超时")
+            return None
+        except requests.exceptions.ConnectionError as e:
+            print(f"更新检查连接错误: {e}")
+            return None
         except requests.exceptions.RequestException as e:
-            print(f"更新检查网络错误: {e}")
+            print(f"更新检查请求错误: {e}")
             return None
         except Exception as e:
             print(f"更新检查失败: {e}")
@@ -594,8 +607,8 @@ class AutoUpdater:
 
     def __init__(self, config):
         self.config = config
-        self.update_url = "https://ipv4.ink/api/check-update"
-        self.download_url = "https://ipv4.ink/downloads"
+        self.update_url = "https://ipv4.ink/win/version.json"
+        self.download_url = "https://ipv4.ink/win/downloads/"
         self.update_available = False
         self.update_info = {}
 
@@ -604,15 +617,18 @@ class AutoUpdater:
         try:
             update_info = self.config.check_for_updates()
 
-            if update_info and 'version' in update_info:
-                remote_version = update_info['version']
+            # 注意：现在返回的是包装过的格式
+            if update_info and update_info.get('success'):
+                data = update_info.get('data', {})
+                if 'version' in data:
+                    remote_version = data['version']
 
-                if self.config.is_new_version_available(remote_version):
-                    self.update_available = True
-                    self.update_info = update_info
-                    return True, update_info
-                else:
-                    return False, "当前已是最新版本"
+                    if self.config.is_new_version_available(remote_version):
+                        self.update_available = True
+                        self.update_info = data
+                        return True, data
+                    else:
+                        return False, "当前已是最新版本"
             else:
                 return False, "检查更新失败或网络错误"
 
