@@ -18,6 +18,12 @@
 3. 按照向导完成安装
 4. 桌面和开始菜单会创建快捷方式
 
+## 开发者搭建方式
+1. 创建根目录\installer，\dist，\build目录
+2. 首先执行buildsmall，得到exe轻量版应用宝
+3. 下载NSIS工具，将EXE移动到\installer目录下，执行build_installer即可
+4. 分发exe软件
+
 ## 使用说明
 1. 程序启动后会自动最小化到系统托盘
 2. 复制任何包含IP地址的文本到剪贴板
@@ -34,4 +40,5 @@
 - 联系微信：wordsafe
 
 ## 许可证
+
 MIT License
